@@ -363,6 +363,56 @@ void AuctionHouseBot::CalculateItemValue(ItemTemplate const* itemProto, uint64& 
         outBuyoutPrice = urand(itemProto->SellPrice, minLowPriceAddVariancePercent * itemProto->SellPrice);
     }
 
+    // --- Per-entry value multiplier (apply near the end) ---
+    static const std::unordered_map<uint32, float> s_ItemEntryValueMultiplier = {
+        // { ItemEntry, Multiplier },
+        { 17771, 0.5f },
+        { 41508, 0.075f },
+        { 44326, 0.0075f },
+        { 44276, 0.0075f },
+        { 31914, 0.0075f },
+        { 31907, 0.0075f },
+        { 44259, 0.0075f },
+        { 31890, 0.0075f },
+        { 31891, 0.0075f },
+        { 44294, 0.0075f },
+        { 24274, 0.0075f },
+        { 24276, 0.0075f },
+        { 41604, 0.0075f },
+        { 38374, 0.0075f },
+        { 29534, 0.0075f },
+        { 41611, 0.0075f },
+        { 24275, 0.0075f },
+        { 29536, 0.0075f },
+        { 29535, 0.0075f },
+        { 44936, 0.0075f },
+        { 38372, 0.0075f },
+        { 44822, 0.01f },
+        { 46398, 0.01f },
+        { 29363, 0.01f },
+        { 48120, 0.01f },
+        { 29958, 0.1f },
+        { 29364, 0.1f },
+        { 29902, 0.1f },
+    };
+
+    if (auto itMul = s_ItemEntryValueMultiplier.find(itemProto->ItemId); itMul != s_ItemEntryValueMultiplier.end())
+    {
+        const double mul = std::max(0.0, static_cast<double>(itMul->second)); // Sicherheit
+        // Buyout und Bid skalieren
+        outBuyoutPrice = static_cast<uint64>(std::clamp(mul * static_cast<double>(outBuyoutPrice),
+                                                        0.0,
+                                                        static_cast<double>(MaxBuyoutPriceInCopper)));
+        outBidPrice    = static_cast<uint64>(std::min<double>(mul * static_cast<double>(outBidPrice),
+                                                            static_cast<double>(outBuyoutPrice)));
+
+        // Floors nach Skalierung respektieren
+        if (outBuyoutPrice < itemProto->SellPrice)
+            outBuyoutPrice = itemProto->SellPrice;
+        if (outBidPrice < itemProto->SellPrice)
+            outBidPrice = itemProto->SellPrice;
+    }
+
     // Bid price can never be below sell price
     if (outBidPrice < itemProto->SellPrice)
         outBidPrice = itemProto->SellPrice;
@@ -526,6 +576,24 @@ float AuctionHouseBot::GetAdvancedPricingMultiplier(ItemTemplate const* itemProt
                 }
                 break;
             }
+            case ITEM_SUBCLASS_JUNK_PET:
+            {
+                if (!AdvancedPricingMiscPetEnabled) 
+                    break;
+                switch (itemProto->Quality)
+                {
+                    case ITEM_QUALITY_POOR:         advancedPricingMultiplier = PriceMultiplierCategoryPetQualityPoor;      break;
+                    case ITEM_QUALITY_NORMAL:       advancedPricingMultiplier = PriceMultiplierCategoryPetQualityNormal;    break;
+                    case ITEM_QUALITY_UNCOMMON:     advancedPricingMultiplier = PriceMultiplierCategoryPetQualityUncommon;  break;
+                    case ITEM_QUALITY_RARE:         advancedPricingMultiplier = PriceMultiplierCategoryPetQualityRare;      break;
+                    case ITEM_QUALITY_EPIC:         advancedPricingMultiplier = PriceMultiplierCategoryPetQualityEpic;      break;
+                    case ITEM_QUALITY_LEGENDARY:    advancedPricingMultiplier = PriceMultiplierCategoryPetQualityLegendary; break;
+                    case ITEM_QUALITY_ARTIFACT:     advancedPricingMultiplier = PriceMultiplierCategoryPetQualityArtifact;  break;
+                    case ITEM_QUALITY_HEIRLOOM:     advancedPricingMultiplier = PriceMultiplierCategoryPetQualityHeirloom;  break;
+                    default: break;
+                }
+                break;
+            }
             default: break;
         }
     }
@@ -588,6 +656,22 @@ void AuctionHouseBot::PopulateItemCandidatesAndProportions()
         // Never store curBlock zero
         if (itr->second.ItemId == 0)
             continue;
+
+        // Disable items with VerifiedBuild = 16000 (DEV ITEMS)
+        if (itr->second.VerifiedBuild == 16000)
+        {
+            if (debug_Out_Filters)
+                LOG_ERROR("module", "AuctionHouseBot: Item {} disabled (VerifiedBuild == 16000)", itr->second.ItemId);
+            continue;
+        }
+
+        // Disable items with ItemLevel > 435 (CATACLYSM ITEMS)
+        if (itr->second.ItemLevel > 435)
+        {
+            if (debug_Out_Filters)
+                LOG_ERROR("module", "AuctionHouseBot: Item {} disabled (ItemLevel > 435)", itr->second.ItemId);
+            continue;
+        }
 
         // If there is an iLevel exception, honor it
         if (ListedItemLevelRestrictedEnabled == true)
@@ -1366,6 +1450,15 @@ void AuctionHouseBot::InitializeConfiguration()
             PriceMultiplierCategoryQuality[category][quality] = multiplier;
         }
     }
+    PriceMultiplierCategoryPetQualityPoor = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityPoor", 1.0);
+    PriceMultiplierCategoryPetQualityNormal = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityNormal", 1.0);
+    PriceMultiplierCategoryPetQualityUncommon = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityUncommon", 1.0);
+    PriceMultiplierCategoryPetQualityRare = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityRare", 1.0);
+    PriceMultiplierCategoryPetQualityEpic = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityEpic", 1.0);
+    PriceMultiplierCategoryPetQualityLegendary = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityLegendary", 1.0);
+    PriceMultiplierCategoryPetQualityArtifact = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityArtifact", 1.0);
+    PriceMultiplierCategoryPetQualityHeirloom = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityHeirloom", 1.0);
+
     PriceMultiplierCategoryMountQualityPoor = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryMount.QualityPoor", 1.0);
     PriceMultiplierCategoryMountQualityNormal = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryMount.QualityNormal", 1.0);
     PriceMultiplierCategoryMountQualityUncommon = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryMount.QualityUncommon", 1.0);
@@ -1388,6 +1481,7 @@ void AuctionHouseBot::InitializeConfiguration()
     AdvancedPricingTradeGoodElementalEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.TradeGood.Elemental.Enabled", true);
     AdvancedPricingTradeGoodMeatEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.TradeGood.Meat.Enabled", true);
     AdvancedPricingMiscJunkEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Junk.Enabled", true);
+    AdvancedPricingMiscPetEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Pet.Enabled", true);
     AdvancedPricingMiscMountEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Mount.Enabled", true);
 
     // Price minimums

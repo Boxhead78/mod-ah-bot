@@ -224,6 +224,14 @@ private:
     float PriceMultiplierQualityArtifact;
     float PriceMultiplierQualityHeirloom;
     float PriceMultiplierCategoryQuality[MAX_ITEM_CLASS][MAX_ITEM_QUALITY];
+    float PriceMultiplierCategoryPetQualityPoor;
+    float PriceMultiplierCategoryPetQualityNormal;
+    float PriceMultiplierCategoryPetQualityUncommon;
+    float PriceMultiplierCategoryPetQualityRare;
+    float PriceMultiplierCategoryPetQualityEpic;
+    float PriceMultiplierCategoryPetQualityLegendary;
+    float PriceMultiplierCategoryPetQualityArtifact;
+    float PriceMultiplierCategoryPetQualityHeirloom;
     float PriceMultiplierCategoryMountQualityPoor;
     float PriceMultiplierCategoryMountQualityNormal;
     float PriceMultiplierCategoryMountQualityUncommon;
@@ -244,6 +252,7 @@ private:
     bool AdvancedPricingTradeGoodElementalEnabled;
     bool AdvancedPricingTradeGoodMeatEnabled;
     bool AdvancedPricingMiscJunkEnabled;
+    bool AdvancedPricingMiscPetEnabled;
     bool AdvancedPricingMiscMountEnabled;
     uint32 PriceMinimumCenterBaseConsumable;
     uint32 PriceMinimumCenterBaseContainer;
