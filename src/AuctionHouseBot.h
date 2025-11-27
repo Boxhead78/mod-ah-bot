@@ -128,14 +128,22 @@ private:
 
     bool SellingBotEnabled;
     bool BuyingBotEnabled;
-    int CyclesBetweenBuyOrSell;
+    bool ReturnExpiredAuctionItemsToBot;
+    uint32 CyclesBetweenBuyActionMin;
+    uint32 CyclesBetweenBuyAction;
+    uint32 CyclesBetweenBuyActionMax;
+    uint32 CyclesBetweenSellActionMin;
+    uint32 CyclesBetweenSellAction;
+    uint32 CyclesBetweenSellActionMax;
     uint32 MaxBuyoutPriceInCopper;
     float BuyoutVariationReducePercent;
     float BuyoutVariationAddPercent;
     float BidVariationHighReducePercent;
     float BidVariationLowReducePercent;
+    bool BuyoutBelowVendorVariationAddPercentEnabled;
     float BuyoutBelowVendorVariationAddPercent;
-    uint32 BuyingBotBuyCandidatesPerBuyCycle;
+    uint32 BuyingBotBuyCandidatesPerBuyCycleMin;
+    uint32 BuyingBotBuyCandidatesPerBuyCycleMax;
     uint32 ListingExpireTimeInSecondsMin;
     uint32 ListingExpireTimeInSecondsMax;
     float BuyingBotAcceptablePriceModifier;
@@ -145,6 +153,9 @@ private:
     std::string AHCharactersGUIDsForQuery;
     uint32 ItemsPerCycle;
     bool DisabledItemTextFilter;
+    bool DisabledRecipeProducedItemFilterEnabled;
+    std::unordered_set<uint32> ItemIDsProducedByRecipes;
+    std::map<uint32, std::unordered_set<uint32>> DisabledRecipeProducedItemClassSubClasses;
     std::set<uint32> DisabledItems;
     bool ListedItemLevelRestrictedEnabled;
     bool ListedItemLevelRestrictedUseCraftedItemForCalculation;
@@ -254,6 +265,7 @@ private:
     bool AdvancedPricingMiscJunkEnabled;
     bool AdvancedPricingMiscPetEnabled;
     bool AdvancedPricingMiscMountEnabled;
+    bool UseItemSellPriceIfHigherThanPriceMinimumCenterBase;
     uint32 PriceMinimumCenterBaseConsumable;
     uint32 PriceMinimumCenterBaseContainer;
     uint32 PriceMinimumCenterBaseWeapon;
@@ -275,12 +287,26 @@ private:
     uint32 ListedItemIDMax;
     std::set<uint32> ListedItemIDExceptionItems;
     bool PreventOverpayingForVendorItems;
+    std::unordered_map<uint32, double> CachedItemDropRates;
+    std::vector<std::vector<std::vector<std::vector<uint32>>>> ItemTiersByClassAndQuality;  // [Classes][Qualities][Tiers] .. [17][7][configurable]
+    std::map<double, int, std::greater<double>> DropRatesToTierMap;
+    std::set<uint32> AdvancedListingRuleUseDropRatesExceptionItems;
+    bool AdvancedListingRuleUseDropRatesEnabled;
+    bool AdvancedListingRuleUseDropRatesWeaponEnabled;
+    bool AdvancedListingRuleUseDropRatesArmorEnabled;
+    bool AdvancedListingRuleUseDropRatesRecipeEnabled;
+    std::set<uint32> AdvancedListingRuleUseDropRatesWeaponAffectedQualities;
+    std::set<uint32> AdvancedListingRuleUseDropRatesArmorAffectedQualities;
+    std::set<uint32> AdvancedListingRuleUseDropRatesRecipeAffectedQualities;
+    float AdvancedListingRuleUseDropRatesMinDropRate;
+    std::unordered_set<uint32> QuestRewardItemIDs;
 
     FactionSpecificAuctionHouseConfig AllianceConfig;
     FactionSpecificAuctionHouseConfig HordeConfig;
     FactionSpecificAuctionHouseConfig NeutralConfig;
 
-    int LastCycleCount;
+    uint32 LastBuyCycleCount;
+    uint32 LastSellCycleCount;
     int ActiveListMultipleItemID;
     int RemainingListMultipleCount;
 
@@ -296,26 +322,46 @@ public:
     ~AuctionHouseBot();
 
     void Update();
+    bool IsModuleEnabled();
     void InitializeConfiguration();
+    void EmptyAuctionHouses();
     uint32 GetRandomStackValue(std::string configKeyString, uint32 defaultValue);
     uint32 GetRandomStackIncrementValue(std::string configKeyString, uint32 defaultValue);
+    void SetCyclesBetweenBuyOrSell();
+    void SetBuyingBotBuyCandidatesPerBuyCycle();
+    void GetConfigMinAndMax(std::string config, uint32& min, uint32& max);
     void AddCharacters(std::string characterGUIDString);
-    void AddItemIDsFromString(std::set<uint32>& workingItemIDSet, std::string itemString, const char* parentOperationName);
-    void AddToItemIDSet(std::set<uint32>& workingItemIDSet, uint32 itemID, const char* parentOperationName);
+    void ParseNumberListToSet(std::set<uint32>& workingItemIDSet, std::string itemString, const char* parentOperationName);
+    void AddToNumberListSet(std::set<uint32>& workingItemIDSet, uint32 itemID, const char* parentOperationName);
     const char* GetQualityName(ItemQualities quality);
     const char* GetCategoryName(ItemClass category);
     uint32 GetStackSizeForItem(ItemTemplate const* itemProto) const;
     void CalculateItemValue(ItemTemplate const* itemProto, uint64& outBidPrice, uint64& outBuyoutPrice);
+    void PopulateItemDropChances();
+    void PopulateItemDropChancesForCategoryAndQuality(ItemClass category, std::string qualities);
+    void InitializeAdvancedListingRuleUseDropRatesTiers();
+    void PopulateQuestRewardItemIDs();
+    bool IsItemQuestReward(uint32 itemID);
+    bool IsItemCrafted(uint32 itemID);
+    bool IsItemCategoryQualityInDBDropRatesConfig(ItemTemplate const* proto);
+    bool IsItemEligibleForDBDropRates(ItemTemplate const* proto);
+    bool HandleAdvancedListingRuleUseDropRates(ItemTemplate const*& proto);
+    int GetItemDropChanceTier(double dropRate);
     float GetAdvancedPricingMultiplier(ItemTemplate const* itemProto);
     ItemTemplate const* GetProducedItemFromRecipe(ItemTemplate const* recipeItemTemplate);
+    std::unordered_set<uint32> GetItemIDsProducedByRecipes();
+    bool IsItemADisabledRecipeProducedClassSubclass(ItemTemplate const* itemTemplate);
     void PopulateItemCandidatesAndProportions();
     uint32 GetRandomItemIDForListing();
-    void AddNewAuctions(Player* AHBplayer, FactionSpecificAuctionHouseConfig* config);
-    void AddNewAuctionBuyerBotBid(Player* AHBplayer, FactionSpecificAuctionHouseConfig* config);
+    void AddNewAuctions(std::vector<Player*> AHBPlayers, FactionSpecificAuctionHouseConfig* config);
+    void AddNewAuctionBuyerBotBid(std::vector<Player*> AHBPlayers, FactionSpecificAuctionHouseConfig* config);
     void PopulateVendorItemsPrices();
+    void CleanupExpiredAuctionItems();
 
     template <typename ValueType>
     void AddItemValuePairsToItemIDMap(std::unordered_map<uint32, ValueType>& workingValueToItemIDMap, std::string valueToItemIDMap);
+    void AddValuesToSetByKeyMap(std::map<uint32, std::unordered_set<uint32>>& workingSetByKeyMap, std::string valuesToKeyMapString,
+        uint32 wildcardLowValue, uint32 wildcardHighValue);
 };
 
 #define auctionbot AuctionHouseBot::instance()

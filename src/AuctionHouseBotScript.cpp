@@ -2,6 +2,7 @@
  * Copyright (C) 2016+ AzerothCore <www.azerothcore.org>, released under GNU AGPL v3 license: https://github.com/azerothcore/azerothcore-wotlk/blob/master/LICENSE-AGPL3
 */
 
+#include "Chat.h"
 #include "ScriptMgr.h"
 #include "AuctionHouseBot.h"
 #include "Log.h"
@@ -19,18 +20,35 @@ public:
 
     void OnAfterConfigLoad(bool /*reload*/) override
     {
+        if (!auctionbot->IsModuleEnabled())
+            return;
+
         auctionbot->InitializeConfiguration();
         if (HasPerformedStartup == true)
         {
             LOG_INFO("server.loading", "AuctionHouseBot: (Re)populating item candidate lists ...");
             auctionbot->PopulateItemCandidatesAndProportions();
+
+            if (sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedListingRules.UseDropRates.Enabled", false))
+            {
+                auctionbot->PopulateQuestRewardItemIDs();
+                auctionbot->PopulateItemDropChances();
+            }
         }
     }
 
     void OnStartup() override
     {
+        if (!auctionbot->IsModuleEnabled())
+            return;
+
         LOG_INFO("server.loading", "AuctionHouseBot: (Re)populating item candidate lists ...");
         auctionbot->PopulateItemCandidatesAndProportions();
+        if (sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedListingRules.UseDropRates.Enabled", false))
+        {
+            auctionbot->PopulateQuestRewardItemIDs();
+            auctionbot->PopulateItemDropChances();
+        }
         HasPerformedStartup = true;
     }
 };
@@ -61,7 +79,7 @@ public:
         }
     }
 
-    void OnBeforeAuctionHouseMgrSendAuctionExpiredMail(AuctionHouseMgr* /*auctionHouseMgr*/, AuctionEntry* /*auction*/, Player* owner, uint32& /*owner_accId*/, bool& sendNotification, bool& /*sendMail*/) override
+    void OnBeforeAuctionHouseMgrSendAuctionExpiredMail(AuctionHouseMgr* /*auctionHouseMgr*/, AuctionEntry* /*auction*/, Player* owner, uint32& /*owner_accId*/, bool& sendNotification, bool& sendMail) override
     {
         if (owner)
         {
@@ -77,6 +95,11 @@ public:
             if (isAHBot == true)
             {
                 sendNotification = false;
+
+                if (sConfigMgr->GetOption<bool>("AuctionHouseBot.ReturnExpiredAuctionItemsToBot", false))
+                    sendMail = true;
+                else
+                    sendMail = false;
             }
         }   
     }
@@ -111,10 +134,91 @@ public:
         }
         if (isAHBot == true)
         {
-            if (sender.GetMailMessageType() == MAIL_AUCTION)        // auction mail with items
-                deleteMailItemsFromDB = true;
-            sendMail = false;
+            if (sConfigMgr->GetOption<bool>("AuctionHouseBot.ReturnExpiredAuctionItemsToBot", false))
+            {
+                deleteMailItemsFromDB = false;
+                sendMail = true;
+            }
+            else
+            {
+                if (sender.GetMailMessageType() == MAIL_AUCTION)        // auction mail with items
+                    deleteMailItemsFromDB = true;
+                sendMail = false;
+            }
         }
+    }
+};
+
+class AHBot_CommandScript : public CommandScript
+{
+public:
+    AHBot_CommandScript() : CommandScript("AHBot_CommandScript") { }
+
+    Acore::ChatCommands::ChatCommandTable GetCommands() const override
+    {
+        static Acore::ChatCommands::ChatCommandTable AHBotCommandTable = {
+            {"update", HandleAHBotUpdateCommand, SEC_GAMEMASTER, Acore::ChatCommands::Console::Yes},
+            {"reload", HandleAHBotReloadCommand, SEC_GAMEMASTER, Acore::ChatCommands::Console::Yes},
+            {"empty",  HandleAHBotEmptyCommand,  SEC_GAMEMASTER, Acore::ChatCommands::Console::Yes},
+            {"help",  HandleAHBotHelpCommand,  SEC_GAMEMASTER, Acore::ChatCommands::Console::Yes}
+        };
+
+        static Acore::ChatCommands::ChatCommandTable commandTable = {
+            {"ahbot", AHBotCommandTable},
+        };
+
+        return commandTable;
+    }
+
+    static bool HandleAHBotUpdateCommand(ChatHandler* handler, const char* /*args*/)
+    {
+        LOG_INFO("module", "AuctionHouseBot: Updating Auction House...");
+        handler->PSendSysMessage("AuctionHouseBot: Updating Auction House...");
+        AuctionHouseBot::instance()->Update();
+        LOG_INFO("module", "AuctionHouseBot: Auction House Updated.");
+        handler->PSendSysMessage("AuctionHouseBot: Auction House Updated.");
+        return true;
+    }
+
+    static bool HandleAHBotReloadCommand(ChatHandler* handler, char const* /*args*/)
+    {
+        LOG_INFO("module", "AuctionHouseBot: Reloading Config...");
+        handler->PSendSysMessage("AuctionHouseBot: Reloading Config...");
+
+        // Reload config file with isReload = true
+        sConfigMgr->LoadModulesConfigs(true, false);
+        AuctionHouseBot::instance()->InitializeConfiguration();
+        AuctionHouseBot::instance()->PopulateItemCandidatesAndProportions();
+
+        if (sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedListingRules.UseDropRates.Enabled", true))
+        {
+            auctionbot->PopulateQuestRewardItemIDs();
+            auctionbot->PopulateItemDropChances();
+        }
+
+        LOG_INFO("module", "AuctionHouseBot: Config reloaded.");
+        handler->PSendSysMessage("AuctionHouseBot: Config reloaded.");        
+        return true;
+    }
+
+    static bool HandleAHBotEmptyCommand(ChatHandler* handler, char const* /*args*/)
+    {
+        LOG_INFO("module", "AuctionHouseBot: Emptying Auction House...");
+        handler->PSendSysMessage("AuctionHouseBot: Emptying Auction House...");
+        AuctionHouseBot::instance()->EmptyAuctionHouses();
+        AuctionHouseBot::instance()->CleanupExpiredAuctionItems(); // Must go after EmptyAuctionHouses()
+        LOG_INFO("module", "AuctionHouseBot: Auction Houses Emptied.");
+        handler->PSendSysMessage("AuctionHouseBot: Auction Houses Emptied.");
+        return true;
+    }
+
+    static bool HandleAHBotHelpCommand(ChatHandler* handler, char const* /*args*/)
+    {
+        handler->PSendSysMessage("AuctionHouseBot commands:");
+        handler->PSendSysMessage("  .ahbot reload - Reloads configuration");
+        handler->PSendSysMessage("  .ahbot empty  - Removes all AuctionHouseBot auctions");
+        handler->PSendSysMessage("  .ahbot update - Runs an update cycle");
+        return true;
     }
 };
 
@@ -123,4 +227,5 @@ void AddAHBotScripts()
     new AHBot_WorldScript();
     new AHBot_AuctionHouseScript();
     new AHBot_MailScript();
+    new AHBot_CommandScript();
 }
