@@ -49,6 +49,9 @@ AuctionHouseBot::AuctionHouseBot() :
     CyclesBetweenSellAction(1),
     CyclesBetweenSellActionMax(1),
     MaxBuyoutPriceInCopper(1000000000),
+    CompleteItemValueOverrideEnabled(false),
+    CompleteItemValueOverrideDoApplyBidVariations(false),
+    CompleteItemValueOverrideDoApplyBuyoutVariations(false),
     BuyoutVariationReducePercent(0.15f),
     BuyoutVariationAddPercent(0.25f),
     BidVariationHighReducePercent(0),
@@ -68,8 +71,11 @@ AuctionHouseBot::AuctionHouseBot() :
     DisabledRecipeProducedItemFilterEnabled(false),
     ListedItemLevelRestrictedEnabled(false),
     ListedItemLevelRestrictedUseCraftedItemForCalculation(true),
-    ListedItemLevelMax(999),
     ListedItemLevelMin(0),
+    ListedItemLevelMax(999),    
+    ListedItemUseOrEquipRestrictedEnabled(false),
+    ListedItemUseOrEquipRestrictMinLevel(0),
+    ListedItemUseOrEquipRestrictMaxLevel(999),    
     RandomStackRatioConsumable(1),
     RandomStackRatioContainer(1),
     RandomStackRatioWeapon(1),
@@ -240,6 +246,29 @@ uint32 AuctionHouseBot::GetStackSizeForItem(ItemTemplate const* itemProto) const
 
 void AuctionHouseBot::CalculateItemValue(ItemTemplate const* itemProto, uint64& outBidPrice, uint64& outBuyoutPrice)
 {
+    if (CompleteItemValueOverrideEnabled == true)
+    {
+        auto it = CompleteItemValueOverrideItemListByItemID.find(itemProto->ItemId);
+        if (it != CompleteItemValueOverrideItemListByItemID.end())
+        {
+            outBuyoutPrice = it->second;
+            if (CompleteItemValueOverrideDoApplyBuyoutVariations == true)
+                outBuyoutPrice = urand(outBuyoutPrice * (1.0f - BuyoutVariationReducePercent), outBuyoutPrice * (1.0f + BuyoutVariationAddPercent));
+
+            if (CompleteItemValueOverrideDoApplyBidVariations == true)
+            {
+                float sellVarianceBidPriceTopPercent = 1.0f - BidVariationHighReducePercent;
+                float sellVarianceBidPriceBottomPercent = 1.0f - BidVariationLowReducePercent;
+                outBidPrice = urand(sellVarianceBidPriceBottomPercent * outBuyoutPrice, sellVarianceBidPriceTopPercent * outBuyoutPrice);
+            }
+            else
+                outBidPrice = outBuyoutPrice;
+
+            return;
+        }
+    }
+
+
     // Start with a buyout price related to the sell price, if configured
     if (UseItemSellPriceIfHigherThanPriceMinimumCenterBase == true)
         outBuyoutPrice = itemProto->SellPrice;
@@ -607,7 +636,7 @@ float AuctionHouseBot::GetAdvancedPricingMultiplier(ItemTemplate const* itemProt
             }
             case ITEM_SUBCLASS_JUNK_PET:
             {
-                if (!AdvancedPricingMiscPetEnabled) 
+                if (!AdvancedPricingMiscPetEnabled)
                     break;
                 switch (itemProto->Quality)
                 {
@@ -826,6 +855,29 @@ void AuctionHouseBot::PopulateItemCandidatesAndProportions()
             }
         }
 
+        // If there is a use/equip level exception, honor it
+        if (ListedItemUseOrEquipRestrictedEnabled == true)
+        {
+            // Only test if it's not an exception
+            if (ListedItemUseOrEquipExceptionItems.find(itr->second.ItemId) == ListedItemUseOrEquipExceptionItems.end())
+            {
+                uint32 useOrEquipLevelCompare = itr->second.RequiredLevel;
+
+                if (useOrEquipLevelCompare > 0 && useOrEquipLevelCompare < ListedItemUseOrEquipRestrictMinLevel)
+                {
+                    if (debug_Out_Filters)
+                        LOG_ERROR("module", "AuctionHouseBot: Item {} disabled since item use or equip level is lower than EquipItemUseOrEquipLevelRestrict.MinItemLevel", itr->second.ItemId);
+                    continue;
+                }
+                if (useOrEquipLevelCompare > 0 && useOrEquipLevelCompare > ListedItemUseOrEquipRestrictMaxLevel)
+                {
+                    if (debug_Out_Filters)
+                        LOG_ERROR("module", "AuctionHouseBot: Item {} disabled since item use or equip level is higher than EquipItemUseOrEquipLevelRestrict.MaxItemLevel", itr->second.ItemId);
+                    continue;
+                }
+            }
+        }
+
         // Disabled items by Id
         if (DisabledItems.find(itr->second.ItemId) != DisabledItems.end())
         {
@@ -922,7 +974,8 @@ void AuctionHouseBot::PopulateItemCandidatesAndProportions()
             itr->second.Name1.find("]") != std::string::npos ||            
             itr->second.Name1.find("D'Sak") != std::string::npos ||
             itr->second.Name1.find("(") != std::string::npos ||
-            itr->second.Name1.find("OLD") != std::string::npos))
+            itr->second.Name1.find("OLD") != std::string::npos ||
+            itr->second.Name1.find("PVP") != std::string::npos))
         {
             if (debug_Out_Filters)
                 LOG_ERROR("module", "AuctionHouseBot: Item {} disabled item with a temp or unused item name", itr->second.ItemId);
@@ -945,22 +998,6 @@ void AuctionHouseBot::PopulateItemCandidatesAndProportions()
         {
             if (debug_Out_Filters)
                 LOG_ERROR("module", "AuctionHouseBot: Item {} disabled misc item", itr->second.ItemId);
-            continue;
-        }
-
-        //  Disable common weapons
-        if (itr->second.Quality == ITEM_QUALITY_NORMAL && itr->second.Class == ITEM_CLASS_WEAPON)
-        {
-            if (debug_Out_Filters)
-                LOG_ERROR("module", "AuctionHouseBot: Item {} disabled common weapon", itr->second.ItemId);
-            continue;
-        }
-
-        // Disable common armor
-        if (itr->second.Quality == ITEM_QUALITY_NORMAL && itr->second.Class == ITEM_CLASS_ARMOR)
-        {
-            if (debug_Out_Filters)
-                LOG_ERROR("module", "AuctionHouseBot: Item {} disabled common non-misc armor", itr->second.ItemId);
             continue;
         }
 
@@ -1931,6 +1968,12 @@ void AuctionHouseBot::InitializeConfiguration()
     string charString = sConfigMgr->GetOption<std::string>("AuctionHouseBot.GUIDs", "0");
     AddCharacters(charString);
 
+    // Top level overrides
+    CompleteItemValueOverrideEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.CompleteItemValueOverride.Enabled", false);
+    AddItemValuePairsToItemIDMap(CompleteItemValueOverrideItemListByItemID, sConfigMgr->GetOption<std::string>("AuctionHouseBot.CompleteItemValueOverride.Items", ""));
+    CompleteItemValueOverrideDoApplyBidVariations = sConfigMgr->GetOption<bool>("AuctionHouseBot.CompleteItemValueOverride.DoApplyBidVariations", false);
+    CompleteItemValueOverrideDoApplyBuyoutVariations = sConfigMgr->GetOption<bool>("AuctionHouseBot.CompleteItemValueOverride.DoApplyBuyoutVariations", false);
+
     // Buyer & Seller core properties
     SetCyclesBetweenBuyOrSell();
     ReturnExpiredAuctionItemsToBot = sConfigMgr->GetOption<bool>("AuctionHouseBot.ReturnExpiredAuctionItemsToBot", false);
@@ -2106,6 +2149,15 @@ void AuctionHouseBot::InitializeConfiguration()
     PriceMultiplierCategoryMountQualityArtifact = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryMount.QualityArtifact", 1.0);
     PriceMultiplierCategoryMountQualityHeirloom = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryMount.QualityHeirloom", 1.0);
 
+    PriceMultiplierCategoryPetQualityPoor = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityPoor", 1.0);
+    PriceMultiplierCategoryPetQualityNormal = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityNormal", 1.0);
+    PriceMultiplierCategoryPetQualityUncommon = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityUncommon", 1.0);
+    PriceMultiplierCategoryPetQualityRare = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityRare", 1.0);
+    PriceMultiplierCategoryPetQualityEpic = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityEpic", 1.0);
+    PriceMultiplierCategoryPetQualityLegendary = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityLegendary", 1.0);
+    PriceMultiplierCategoryPetQualityArtifact = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityArtifact", 1.0);
+    PriceMultiplierCategoryPetQualityHeirloom = sConfigMgr->GetOption<float>("AuctionHouseBot.PriceMultiplier.CategoryPet.QualityHeirloom", 1.0);
+
     // Advanced Pricing
     AdvancedPricingConsumablePotionEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Consumable.Potion.Enabled", true);
     AdvancedPricingConsumableElixirEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Consumable.Elixir.Enabled", true);
@@ -2121,6 +2173,7 @@ void AuctionHouseBot::InitializeConfiguration()
     AdvancedPricingMiscJunkEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Junk.Enabled", true);
     AdvancedPricingMiscPetEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Pet.Enabled", true);
     AdvancedPricingMiscMountEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Mount.Enabled", true);
+    AdvancedPricingMiscPetEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.AdvancedPricing.Misc.Pet.Enabled", true);
 
     // Price minimums
     UseItemSellPriceIfHigherThanPriceMinimumCenterBase = sConfigMgr->GetOption<bool>("AuctionHouseBot.PriceMinimumCenterBase.UseItemSellPriceIfHigher", true);
@@ -2155,6 +2208,13 @@ void AuctionHouseBot::InitializeConfiguration()
     ListedItemIDMax = sConfigMgr->GetOption("AuctionHouseBot.ListedItemIDRestrict.MaxItemID", 200000);
     ListedItemIDExceptionItems.clear();
     ParseNumberListToSet(ListedItemIDExceptionItems, sConfigMgr->GetOption<std::string>("AuctionHouseBot.ListedItemIDRestrict.ExceptionItemIDs", ""), "ListedItemIDRestrict.ExceptionItemIDs");
+
+    // Equip or use restrictions
+    ListedItemUseOrEquipRestrictedEnabled = sConfigMgr->GetOption<bool>("AuctionHouseBot.EquipItemUseOrEquipLevelRestrict.Enabled", false);
+    ListedItemUseOrEquipRestrictMinLevel = sConfigMgr->GetOption("AuctionHouseBot.EquipItemUseOrEquipLevelRestrict.MinLevel", 0);
+    ListedItemUseOrEquipRestrictMaxLevel = sConfigMgr->GetOption("AuctionHouseBot.EquipItemUseOrEquipLevelRestrict.MaxLevel", 999);
+    ListedItemUseOrEquipExceptionItems.clear();
+    ParseNumberListToSet(ListedItemUseOrEquipExceptionItems, sConfigMgr->GetOption<std::string>("AuctionHouseBot.EquipItemUseOrEquipLevelRestrict.ExceptionItemIDs", ""), "EquipItemUseOrEquipLevelRestrict.ExceptionItemIDs");
 
     // Disabled Items
     DisabledItemTextFilter = sConfigMgr->GetOption<bool>("AuctionHouseBot.DisabledItemTextFilter", true);

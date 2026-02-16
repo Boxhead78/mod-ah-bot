@@ -136,6 +136,10 @@ private:
     uint32 CyclesBetweenSellAction;
     uint32 CyclesBetweenSellActionMax;
     uint32 MaxBuyoutPriceInCopper;
+    bool CompleteItemValueOverrideEnabled;
+    std::unordered_map<uint32, uint64> CompleteItemValueOverrideItemListByItemID;
+    bool CompleteItemValueOverrideDoApplyBidVariations;
+    bool CompleteItemValueOverrideDoApplyBuyoutVariations;
     float BuyoutVariationReducePercent;
     float BuyoutVariationAddPercent;
     float BidVariationHighReducePercent;
@@ -159,9 +163,13 @@ private:
     std::set<uint32> DisabledItems;
     bool ListedItemLevelRestrictedEnabled;
     bool ListedItemLevelRestrictedUseCraftedItemForCalculation;
-    uint32 ListedItemLevelMax;
     uint32 ListedItemLevelMin;
+    uint32 ListedItemLevelMax;
     std::set<uint32> ListedItemLevelExceptionItems;
+    bool ListedItemUseOrEquipRestrictedEnabled;
+    uint32 ListedItemUseOrEquipRestrictMinLevel;
+    uint32 ListedItemUseOrEquipRestrictMaxLevel;
+    std::set<uint32> ListedItemUseOrEquipExceptionItems;
     uint32 RandomStackRatioConsumable;
     uint32 RandomStackRatioContainer;
     uint32 RandomStackRatioWeapon;
@@ -251,6 +259,14 @@ private:
     float PriceMultiplierCategoryMountQualityLegendary;
     float PriceMultiplierCategoryMountQualityArtifact;
     float PriceMultiplierCategoryMountQualityHeirloom;
+    float PriceMultiplierCategoryPetQualityPoor;
+    float PriceMultiplierCategoryPetQualityNormal;
+    float PriceMultiplierCategoryPetQualityUncommon;
+    float PriceMultiplierCategoryPetQualityRare;
+    float PriceMultiplierCategoryPetQualityEpic;
+    float PriceMultiplierCategoryPetQualityLegendary;
+    float PriceMultiplierCategoryPetQualityArtifact;
+    float PriceMultiplierCategoryPetQualityHeirloom;
     bool AdvancedPricingConsumablePotionEnabled;
     bool AdvancedPricingConsumableElixirEnabled;
     bool AdvancedPricingConsumableFlaskEnabled;
@@ -265,6 +281,7 @@ private:
     bool AdvancedPricingMiscJunkEnabled;
     bool AdvancedPricingMiscPetEnabled;
     bool AdvancedPricingMiscMountEnabled;
+    bool AdvancedPricingMiscPetEnabled;
     bool UseItemSellPriceIfHigherThanPriceMinimumCenterBase;
     uint32 PriceMinimumCenterBaseConsumable;
     uint32 PriceMinimumCenterBaseContainer;
